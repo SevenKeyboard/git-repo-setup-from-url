@@ -4,11 +4,13 @@ $ErrorActionPreference = 'Stop'
 
 #===========================================================
 # This script:
-#   - Prompts for a GitHub repository URL,
+#   - Prompts for GitHub repository URLs (HTTPS only),
 #   - Uses the directory of this script as the base working folder,
-#   - Performs a bare clone into a ".repo" directory,
-#   - Creates a worktree for each remote "origin" branch,
-#   - Sets the upstream of each local branch to "origin/<branch>".
+#   - For each URL:
+#       * Performs a bare clone into a ".repo" directory,
+#       * Creates a worktree for each remote "origin" branch,
+#       * Sets the upstream of each local branch to "origin/<branch>".
+#   - Repeats until the user enters a blank URL.
 #===========================================================
 
 # Base directory for repositories: the directory where this script (.ps1) resides
@@ -46,24 +48,17 @@ function Invoke-Git {
     }
 }
 
-try {
-    #-------------------------------------------------------
-    # 1. Read repository URL
-    #-------------------------------------------------------
-
-    # HTTPS URLs only (with or without the .git suffix).
-    Write-Host 'Enter the GitHub repository URL (HTTPS only, e.g., https://github.com/user/repo)'
-    $RepoUrl = Read-Host 'Repository URL'
-
-    if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
-        throw 'No repository URL was entered. Aborting.'
-    }
+function Invoke-RepoWorktrees {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoUrl
+    )
 
     # Trim whitespace
     $RepoUrl = $RepoUrl.Trim()
 
     #-------------------------------------------------------
-    # 2. Parse URL → Owner / Repo name / working folder
+    # 1. Parse URL → Owner / Repo name / working folder
     #-------------------------------------------------------
     try {
         $uri = [Uri]$RepoUrl
@@ -101,27 +96,30 @@ try {
     Write-Host '==========================================='
     Write-Host ''
 
-    # Check if working folder already exists
+    #-------------------------------------------------------
+    # 2. Check working folder
+    #-------------------------------------------------------
     if (Test-Path $WorkDir) {
         # Count all items inside the directory (including hidden ones)
         $itemCount = (Get-ChildItem -Path $WorkDir -Force | Measure-Object).Count
 
         if ($itemCount -gt 0) {
-            throw "The working folder already exists and is not empty: $WorkDir`nTo avoid overwriting existing content, the script will stop."
+            throw "The working folder already exists and is not empty: $WorkDir`nTo avoid overwriting existing content, the operation for this repository will stop."
         }
         else {
             Write-Host "The working folder already exists but is empty. It will be reused."
         }
     }
 
-
-    # Check if "git" is available
+    #-------------------------------------------------------
+    # 3. Check if "git" is available
+    #-------------------------------------------------------
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         throw "The 'git' command could not be found. Please make sure Git is installed and available in PATH."
     }
 
     #-------------------------------------------------------
-    # 3. Create working folder and change directory
+    # 4. Create working folder and change directory
     #-------------------------------------------------------
     if (-not (Test-Path $WorkDir)) {
         New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
@@ -129,14 +127,14 @@ try {
     Set-Location $WorkDir
 
     #-------------------------------------------------------
-    # 4. Perform bare clone
+    # 5. Perform bare clone
     #-------------------------------------------------------
     Write-Host '>>> Running "git clone --bare"...'
     Invoke-Git -Arguments @('clone', '--bare', $RepoUrl, '.repo') `
                -ErrorMessage 'Failed to run "git clone --bare".'
 
     #-------------------------------------------------------
-    # 5. Configure remote.origin.fetch and fetch
+    # 6. Configure remote.origin.fetch and fetch
     #-------------------------------------------------------
     Write-Host '>>> Configuring remote.origin.fetch...'
     Invoke-Git -Arguments @('--git-dir=.repo', 'config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*') `
@@ -147,7 +145,7 @@ try {
                -ErrorMessage 'Failed to run "git fetch origin".'
 
     #-------------------------------------------------------
-    # 6. Collect remote branch list
+    # 7. Collect remote branch list
     #-------------------------------------------------------
     Write-Host '>>> Retrieving remote branch list...'
 
@@ -176,7 +174,7 @@ try {
     Write-Host ''
 
     #-------------------------------------------------------
-    # 7. Create worktrees for each branch
+    # 8. Create worktrees for each branch
     #-------------------------------------------------------
     foreach ($branch in $RemoteBranches) {
         Write-Host ">>> Adding worktree... (branch: $branch)"
@@ -185,7 +183,7 @@ try {
     }
 
     #-------------------------------------------------------
-    # 8. Set upstream for each branch (branch -> origin/branch)
+    # 9. Set upstream for each branch (branch -> origin/branch)
     #-------------------------------------------------------
     foreach ($branch in $RemoteBranches) {
         $originBranch = "origin/$branch"
@@ -195,13 +193,36 @@ try {
     }
 
     #-------------------------------------------------------
-    # 9. Completion summary
+    # 10. Completion summary for this repository
     #-------------------------------------------------------
     Write-Host ''
-    Write-Host 'All operations completed successfully.'
+    Write-Host 'All operations completed successfully for this repository.'
     Write-Host 'Created worktree paths:'
     foreach ($branch in $RemoteBranches) {
         Write-Host " - $WorkDir\$branch"
+    }
+
+    # Optionally go back to base directory after finishing this repository
+    Set-Location $BaseDir
+}
+
+try {
+    #-------------------------------------------------------
+    # Main loop: process multiple repository URLs
+    #   - Blank input → exit the script.
+    #   - Any failure → exit via catch.
+    #-------------------------------------------------------
+    while ($true) {
+        Write-Host ''
+        Write-Host 'Enter the GitHub repository URL (HTTPS only, e.g., https://github.com/user/repo)'
+        $RepoUrl = Read-Host 'Repository URL (blank to exit)'
+
+        if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
+            break
+        }
+
+        Invoke-RepoWorktrees -RepoUrl $RepoUrl
+        # On success, the loop continues and prompts for the next URL.
     }
 
     Pause-End 'Script finished successfully.'

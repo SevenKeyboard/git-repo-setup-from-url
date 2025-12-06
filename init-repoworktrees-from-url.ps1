@@ -151,16 +151,19 @@ try {
     #-------------------------------------------------------
     Write-Host '>>> Retrieving remote branch list...'
 
-    $remoteBranchesRaw = git --git-dir=.repo for-each-ref --format="%(refname:short)" "refs/remotes/origin/*"
+    $remoteBranchesRaw = @(
+        git --git-dir=.repo for-each-ref --format="%(refname:short)" "refs/remotes/origin/*"
+    )
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to retrieve the remote branch list."
     }
 
-    $RemoteBranches =
+    $RemoteBranches = @(
         $remoteBranchesRaw |
         Where-Object { $_ -and ($_ -notlike 'origin/HEAD*') -and ($_ -ne 'origin') } |
         ForEach-Object { $_ -replace '^origin/', '' } |
         Sort-Object -Unique
+    )
 
     if (-not $RemoteBranches -or $RemoteBranches.Count -eq 0) {
         throw "No usable branches were found under the remote 'origin'."
